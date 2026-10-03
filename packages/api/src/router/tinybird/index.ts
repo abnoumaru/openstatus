@@ -157,6 +157,15 @@ export function getStatusProcedure(_period: "45d", type: Type) {
   throw new TRPCError({ code: "NOT_FOUND", message: "Invalid type" });
 }
 
+/**
+ * Zone-aware variant of the 45d status read. Only http has the hourly MV so
+ * far; the other protocols return undefined and callers fall back to UTC days.
+ */
+export function getStatusInTimeZoneProcedure(type: Type) {
+  if (type === "http") return tb.httpStatus60m;
+  return undefined;
+}
+
 export function getGetProcedure(period: "14d", type: Type) {
   switch (period) {
     case "14d":
