@@ -11,18 +11,23 @@ import {
   type StatusCalendarSkeletonProps,
 } from "@openstatus/ui/components/blocks/status-calendar";
 import { useStatusBlocksLabels } from "@openstatus/ui/components/blocks/status-i18n";
-import {
-  eachDayOfInterval,
-  max as maxDate,
-  min as minDate,
-  startOfDay,
-} from "date-fns";
+import { dateInTimeZone } from "@openstatus/utils";
+import { eachDayOfInterval, max as maxDate, min as minDate } from "date-fns";
 import { useLocale } from "next-intl";
 import { useCallback, useMemo } from "react";
 
 import { usePathnamePrefix } from "../../hooks/use-pathname-prefix";
 import type { Locale as AppLocale } from "../../i18n/config";
 import { Link } from "../common/link";
+import { useStatusPage } from "./floating-button";
+
+// The calendar grid is drawn in the viewer's local days, so a marker is placed
+// on the local Date whose calendar date equals the event's date in the page
+// zone — not on `startOfDay(instant)`, which would be the viewer's day.
+function calendarDayInZone(instant: Date, timeZone: string): Date {
+  const { year, month, day } = dateInTimeZone(instant, timeZone);
+  return new Date(year, month - 1, day);
+}
 
 type Page = NonNullable<RouterOutputs["statusPage"]["get"]>;
 type ReportInput = Page["statusReports"][number];
@@ -53,6 +58,7 @@ export function StatusCalendar({
 }: Props) {
   const labels = useStatusBlocksLabels();
   const locale = useLocale() as AppLocale;
+  const { timezone } = useStatusPage();
   const dateFnsLocale = dateFnsLocales[locale];
   const prefix = usePathnamePrefix();
   const base = prefix ? `/${prefix}` : "";
@@ -78,7 +84,7 @@ export function StatusCalendar({
 
       out.push({
         id: `report-${report.id}`,
-        date: startOfDay(startedAt),
+        date: calendarDayInZone(startedAt, timezone),
         status: "degraded",
         type: "report",
         name: report.title,
@@ -89,8 +95,8 @@ export function StatusCalendar({
     }
 
     for (const m of maintenances) {
-      const start = startOfDay(minDate([m.from, m.to]));
-      const end = startOfDay(maxDate([m.from, m.to]));
+      const start = calendarDayInZone(minDate([m.from, m.to]), timezone);
+      const end = calendarDayInZone(maxDate([m.from, m.to]), timezone);
       const href = `${base}/events/maintenance/${m.id}`;
       for (const day of eachDayOfInterval({ start, end })) {
         out.push({
@@ -113,8 +119,8 @@ export function StatusCalendar({
         if (seenIncidents.has(inc.id)) continue;
         seenIncidents.add(inc.id);
         const startedAt = inc.startedAt;
-        const end = startOfDay(inc.resolvedAt ?? new Date());
-        const start = startOfDay(startedAt);
+        const end = calendarDayInZone(inc.resolvedAt ?? new Date(), timezone);
+        const start = calendarDayInZone(startedAt, timezone);
         for (const day of eachDayOfInterval({ start, end })) {
           out.push({
             id: `incident-${inc.id}-${day.toISOString()}`,
@@ -132,7 +138,14 @@ export function StatusCalendar({
     }
 
     return out;
-  }, [statusReports, maintenances, pageComponents, downtimeLabel, base]);
+  }, [
+    statusReports,
+    maintenances,
+    pageComponents,
+    downtimeLabel,
+    base,
+    timezone,
+  ]);
 
   const renderMarkerRow = useCallback((marker: StatusCalendarMarker) => {
     const event = (

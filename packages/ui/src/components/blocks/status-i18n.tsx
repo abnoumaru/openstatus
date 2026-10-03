@@ -63,6 +63,11 @@ export type StatusBlocksLabels = {
   formatDate: (d: Date) => string;
   formatDateShort: (d: Date) => string;
   formatDateTime: (d: Date) => string;
+  /**
+   * Compact monospace stamp for the banner's "last updated" slot
+   * (`Oct 03, 2026 14:41 (UTC)`), kept apart from the prose formatters.
+   */
+  formatTimestamp: (d: Date) => string;
   formatDateRange: (from?: Date, to?: Date) => string;
   /**
    * Returns the start/end of a closed range as separate strings, so callers

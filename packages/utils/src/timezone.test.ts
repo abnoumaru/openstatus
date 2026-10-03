@@ -8,6 +8,7 @@ import {
   endOfDayInTimeZone,
   isSameDayInTimeZone,
   startOfDayInTimeZone,
+  timeZoneAbbreviation,
 } from "./timezone";
 
 describe("startOfDayInTimeZone", () => {
@@ -111,5 +112,36 @@ describe("canonicalTimeZone", () => {
   test("rejects unknown names", () => {
     expect(canonicalTimeZone("Mars/Olympus")).toBeUndefined();
     expect(canonicalTimeZone("")).toBeUndefined();
+  });
+});
+
+describe("timeZoneAbbreviation", () => {
+  test("zones in the table get their abbreviation", () => {
+    expect(
+      timeZoneAbbreviation("Asia/Tokyo", new Date("2026-10-03T00:00:00Z")),
+    ).toBe("JST");
+    expect(
+      timeZoneAbbreviation("Europe/Berlin", new Date("2026-07-01T00:00:00Z")),
+    ).toBe("CEST");
+    expect(
+      timeZoneAbbreviation("Europe/Berlin", new Date("2026-01-15T00:00:00Z")),
+    ).toBe("CET");
+    // southern hemisphere: daylight time in January
+    expect(
+      timeZoneAbbreviation(
+        "Australia/Sydney",
+        new Date("2026-01-15T00:00:00Z"),
+      ),
+    ).toBe("AEDT");
+    expect(
+      timeZoneAbbreviation(
+        "Australia/Sydney",
+        new Date("2026-07-01T00:00:00Z"),
+      ),
+    ).toBe("AEST");
+  });
+  test("zones outside the table yield undefined so callers can fall back", () => {
+    expect(timeZoneAbbreviation("America/Los_Angeles")).toBeUndefined();
+    expect(timeZoneAbbreviation("Asia/Kolkata")).toBeUndefined();
   });
 });
