@@ -6,8 +6,22 @@ import {
   THEME_KEYS,
   validateCustomTheme,
 } from "@openstatus/theme-store";
+import { canonicalTimeZone } from "@openstatus/utils";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
+
+// Stored in the IANA spelling Intl resolves to ("asia/tokyo" → "Asia/Tokyo"),
+// because ClickHouse looks zones up case-sensitively. The "whole-hour offsets
+// only" rule agreed for the first release is enforced at the dashboard form,
+// not here, so stored pages never fail to parse when that list widens.
+export const timeZoneSchema = z.string().transform((tz, ctx) => {
+  const canonical = canonicalTimeZone(tz);
+  if (!canonical) {
+    ctx.addIssue({ code: "custom", message: "Unknown IANA time zone" });
+    return z.NEVER;
+  }
+  return canonical;
+});
 
 import { pageAccessTypes } from "./constants";
 import { page } from "./page";
@@ -100,6 +114,7 @@ export const insertPageSchema = createInsertSchema(page, {
       .nullish(),
     defaultLocale: z.enum(locales).prefault("en"),
     locales: z.array(z.enum(locales)).nullable().optional(),
+    defaultTimezone: timeZoneSchema.prefault("UTC"),
     customTheme: customThemeWriteSchema,
   })
   .refine(
@@ -155,6 +170,7 @@ export const selectPageSchema = createSelectSchema(page).extend({
   allowedIpRanges: stringToArray.prefault([]),
   defaultLocale: z.enum(locales).prefault("en"),
   locales: z.array(z.enum(locales)).nullable().prefault(null),
+  defaultTimezone: timeZoneSchema.prefault("UTC"),
 });
 
 export type InsertPage = z.infer<typeof insertPageSchema>;

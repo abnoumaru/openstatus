@@ -51,6 +51,7 @@ import {
   getMetricsLatencyMultiProcedure,
   getMetricsLatencyProcedure,
   getMetricsRegionsProcedure,
+  getStatusInTimeZoneProcedure,
   getStatusProcedure,
   getUptimeProcedure,
 } from "./tinybird";
@@ -776,6 +777,9 @@ export const statusPageRouter = createTRPCRouter({
         grpc: monitors.filter((c) => c.monitor.jobType === "grpc"),
       };
 
+      // Bars sum hourly buckets into the page's local days; protocols without
+      // an hourly MV yet stay on UTC days (see getStatusInTimeZoneProcedure).
+      const timeZone = _page.defaultTimezone;
       const proceduresByType = {
         http: getStatusProcedure("45d", "http"),
         tcp: getStatusProcedure("45d", "tcp"),
@@ -796,6 +800,13 @@ export const statusPageRouter = createTRPCRouter({
                   type as keyof typeof proceduresByType
                 ].map((c) => c.monitor.id.toString());
                 if (monitorIds.length === 0) return null;
+                const zoned =
+                  timeZone === "UTC"
+                    ? undefined
+                    : getStatusInTimeZoneProcedure(
+                        type as keyof typeof proceduresByType,
+                      );
+                if (zoned) return zoned({ monitorIds, timezone: timeZone });
                 return procedure({ monitorIds });
               }),
             ),
@@ -867,6 +878,7 @@ export const statusPageRouter = createTRPCRouter({
             rawData,
             monitorId,
             lookbackPeriod,
+            timeZone,
           );
         } else {
           // Static components, manual mode, or NOOP mode: use synthetic data
@@ -874,6 +886,7 @@ export const statusPageRouter = createTRPCRouter({
             errorDays: [],
             degradedDays: [],
             lookbackPeriod,
+            timeZone,
           });
         }
 
