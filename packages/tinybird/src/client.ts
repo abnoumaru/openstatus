@@ -807,6 +807,30 @@ export class OSTinybird {
     });
   }
 
+  /**
+   * Hourly status buckets folded into days of `timezone` at read time. Returns
+   * the same columns as the 45d pipe; `day` arrives as epoch ms of the local
+   * midnight (an instant), not a zone-less date string.
+   */
+  public get httpStatus60m() {
+    return this.tb.buildPipe({
+      pipe: "endpoint__http_status_60m__v0",
+      parameters: z.object({
+        monitorIds: z.string().array(),
+        timezone: z.string().default("UTC"),
+      }),
+      data: z.object({
+        day: z.number().transform((ms) => new Date(ms).toISOString()),
+        count: z.number().prefault(0),
+        ok: z.number().prefault(0),
+        degraded: z.number().prefault(0),
+        error: z.number().prefault(0),
+        monitorId: z.string(),
+      }),
+      opts: { next: { revalidate: REVALIDATE } },
+    });
+  }
+
   public get httpStatus45d() {
     return this.tb.buildPipe({
       pipe: "endpoint__http_status_45d__v1",
