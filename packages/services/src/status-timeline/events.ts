@@ -13,6 +13,11 @@ import {
   impactToStatusType,
   worstImpact,
 } from "@openstatus/db/src/schema";
+import {
+  MS_PER_DAY,
+  addDaysInTimeZone,
+  startOfDayInTimeZone,
+} from "@openstatus/utils";
 
 export type MonitorComponentWithNonNullMonitor =
   PageComponentWithMonitorRelation & {
@@ -34,7 +39,14 @@ export function isMonitorComponent(
 }
 
 export type StatusData = {
+  /** Instant the bar's window starts: local midnight in the page's zone. */
   day: string;
+  /**
+   * Instant the window ends (the next day's start). Optional so hand-built
+   * rows and older callers keep working; without it the window is 24h, which
+   * is only wrong on the two DST days a year.
+   */
+  dayEnd?: string;
   count: number;
   ok: number;
   degraded: number;
@@ -42,48 +54,60 @@ export type StatusData = {
   monitorId: string;
 };
 
+/** A bar's half-open window `[start, end)`. */
+export type DayWindow = { start: Date; end: Date };
+
+export function dayWindowOf(
+  item: Pick<StatusData, "day" | "dayEnd">,
+): DayWindow {
+  const start = new Date(item.day);
+  const end = item.dayEnd
+    ? new Date(item.dayEnd)
+    : new Date(start.getTime() + MS_PER_DAY);
+  return { start, end };
+}
+
+/** Accepts the window itself or just its start (then 24h long). */
+export function toDayWindow(day: Date | DayWindow): DayWindow {
+  return day instanceof Date
+    ? { start: day, end: new Date(day.getTime() + MS_PER_DAY) }
+    : day;
+}
+
 export function fillStatusDataFor45Days(
   data: Array<StatusData>,
   monitorId: string,
   lookbackPeriod = 45,
+  timeZone = "UTC",
 ): Array<StatusData> {
-  const result = [];
-  const dataByDay = new Map();
-
-  // Index existing data by day
+  // `day` is the instant a bar's 24h window starts (local midnight in
+  // `timeZone`), so rows are keyed by that exact instant rather than by a UTC
+  // calendar date.
+  const dataByDay = new Map<number, StatusData>();
   data.forEach((item) => {
-    const dayKey = new Date(item.day).toISOString().split("T")[0]; // YYYY-MM-DD format
-    dataByDay.set(dayKey, item);
+    dataByDay.set(new Date(item.day).getTime(), item);
   });
 
-  // Generate all days from today backwards
-  const now = new Date();
+  const today = startOfDayInTimeZone(new Date(), timeZone);
+  const result: StatusData[] = [];
+  let dayEnd = addDaysInTimeZone(today, 1, timeZone);
   for (let i = 0; i < lookbackPeriod; i++) {
-    const date = new Date(now);
-    date.setUTCDate(date.getUTCDate() - i);
-    date.setUTCHours(0, 0, 0, 0); // Set to start of day in UTC
-
-    const dayKey = date.toISOString().split("T")[0]; // YYYY-MM-DD format
-    const isoString = date.toISOString();
-
-    if (dataByDay.has(dayKey)) {
-      // Use existing data but ensure the day is properly formatted
-      const existingData = dataByDay.get(dayKey);
-      result.push({
-        ...existingData,
-        day: isoString,
-      });
-    } else {
-      // Fill missing day with default values
-      result.push({
-        day: isoString,
-        count: 0,
-        ok: 0,
-        degraded: 0,
-        error: 0,
-        monitorId,
-      });
-    }
+    const dayStart = addDaysInTimeZone(today, -i, timeZone);
+    const isoString = dayStart.toISOString();
+    const existing = dataByDay.get(dayStart.getTime());
+    const row = existing
+      ? { ...existing, day: isoString, dayEnd: dayEnd.toISOString() }
+      : {
+          day: isoString,
+          dayEnd: dayEnd.toISOString(),
+          count: 0,
+          ok: 0,
+          degraded: 0,
+          error: 0,
+          monitorId,
+        };
+    result.push(row);
+    dayEnd = dayStart;
   }
 
   // Sort by day (oldest first)
@@ -96,27 +120,25 @@ export function fillStatusDataFor45DaysNoop({
   errorDays,
   degradedDays,
   lookbackPeriod = 45,
+  timeZone = "UTC",
 }: {
   errorDays: number[];
   degradedDays: number[];
   lookbackPeriod?: number;
+  timeZone?: string;
 }): Array<StatusData> {
   const issueDays = [...errorDays, ...degradedDays];
-  // UTC day grid, matching fillStatusDataFor45Days, so synthetic days line up
-  const data: StatusData[] = Array.from({ length: lookbackPeriod }, (_, i) => {
-    const date = new Date();
-    date.setUTCDate(date.getUTCDate() - i);
-    date.setUTCHours(0, 0, 0, 0);
-    return {
-      day: date.toISOString(),
-      count: 1,
-      ok: issueDays.includes(i) ? 0 : 1,
-      degraded: degradedDays.includes(i) ? 1 : 0,
-      error: errorDays.includes(i) ? 1 : 0,
-      monitorId: "1",
-    };
-  });
-  return fillStatusDataFor45Days(data, "1", lookbackPeriod);
+  // Same day grid as fillStatusDataFor45Days, so synthetic days line up
+  const today = startOfDayInTimeZone(new Date(), timeZone);
+  const data: StatusData[] = Array.from({ length: lookbackPeriod }, (_, i) => ({
+    day: addDaysInTimeZone(today, -i, timeZone).toISOString(),
+    count: 1,
+    ok: issueDays.includes(i) ? 0 : 1,
+    degraded: degradedDays.includes(i) ? 1 : 0,
+    error: errorDays.includes(i) ? 1 : 0,
+    monitorId: "1",
+  }));
+  return fillStatusDataFor45Days(data, "1", lookbackPeriod, timeZone);
 }
 
 export type ImpactInterval = {
@@ -456,14 +478,12 @@ export function getHighestPriorityStatus(
 // worst report impact for one day; null = legacy event (no impact rows)
 export function reportEventDayImpact(
   event: Event,
-  date: Date,
+  day: Date | DayWindow,
 ): PageComponentImpact | null {
   if (!event.impactIntervals) return null;
 
-  const startOfDay = new Date(date);
-  startOfDay.setUTCHours(0, 0, 0, 0);
-  const endOfDay = new Date(date);
-  endOfDay.setUTCHours(23, 59, 59, 999);
+  const { start: startOfDay, end } = toDayWindow(day);
+  const endOfDay = new Date(end.getTime() - 1);
 
   const overlapping = event.impactIntervals.filter((iv) => {
     const end = iv.to ?? new Date();
@@ -478,19 +498,19 @@ export function reportEventDayImpact(
 // worst projected report color for one day; legacy events stay orange
 export function reportEventDayStatus(
   event: Event,
-  date: Date,
+  day: Date | DayWindow,
 ): "success" | "degraded" | "error" {
-  const impact = reportEventDayImpact(event, date);
+  const impact = reportEventDayImpact(event, day);
   return impact === null ? "degraded" : impactToStatusType(impact);
 }
 
 // Helper to check if date is within event range
-export function isDateWithinEvent(date: Date, event: Event): boolean {
-  const startOfDay = new Date(date);
-  startOfDay.setUTCHours(0, 0, 0, 0);
-
-  const endOfDay = new Date(date);
-  endOfDay.setUTCHours(23, 59, 59, 999);
+export function isDateWithinEvent(
+  day: Date | DayWindow,
+  event: Event,
+): boolean {
+  const { start: startOfDay, end } = toDayWindow(day);
+  const endOfDay = new Date(end.getTime() - 1);
 
   const eventStart = new Date(event.from);
   const eventEnd = event.to ? new Date(event.to) : new Date();
