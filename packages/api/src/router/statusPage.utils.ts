@@ -10,12 +10,14 @@ import {
   type CoverageSegment,
   downtimeIntervals,
   type Event,
-  MS_PER_DAY,
   probeDowntimeIntervals,
+  type DayWindow,
   type StatusData,
   type UptimeWindow,
   type WeightedInterval,
   dayCoverage,
+  dayWindowOf,
+  toDayWindow,
   durationDowntimeMs,
   floorPct,
   getHighestPriorityStatus,
@@ -91,14 +93,11 @@ function formatNumber(num: number): string {
   return num.toString();
 }
 
-// Helper to check if date is today
-function isToday(date: Date): boolean {
-  const today = new Date();
-  return (
-    date.getUTCDate() === today.getUTCDate() &&
-    date.getUTCMonth() === today.getUTCMonth() &&
-    date.getUTCFullYear() === today.getUTCFullYear()
-  );
+// "today" is the bar whose window holds now (see fillStatusDataFor45Days)
+function isToday(day: Date | DayWindow): boolean {
+  const { start, end } = toDayWindow(day);
+  const now = Date.now();
+  return start.getTime() <= now && now < end.getTime();
 }
 
 // Helper to format duration from minutes
@@ -111,22 +110,17 @@ function formatDuration(minutes: number): string {
 }
 
 // Helper to calculate total minutes in a day (handles today vs past days)
-function getTotalMinutesInDay(date: Date): number {
-  const now = new Date();
-  const startOfDay = new Date(date);
-  startOfDay.setUTCHours(0, 0, 0, 0);
-
-  if (isToday(date)) {
-    const minutesElapsed = Math.floor(
-      (now.getTime() - startOfDay.getTime()) / MILLISECONDS_PER_MINUTE,
-    );
-    return minutesElapsed;
-  }
-  return 24 * 60;
+function getTotalMinutesInDay(day: Date | DayWindow): number {
+  const { start, end } = toDayWindow(day);
+  const until = isToday(day) ? Date.now() : end.getTime();
+  return Math.floor((until - start.getTime()) / MILLISECONDS_PER_MINUTE);
 }
 
 // Helper to calculate duration in minutes for a specific event type
-function calculateEventDurationMinutes(events: Event[], date: Date): number {
+function calculateEventDurationMinutes(
+  events: Event[],
+  date: Date | DayWindow,
+): number {
   const totalDuration = getTotalEventsDurationMs(events, date);
   return Math.round(totalDuration / MILLISECONDS_PER_MINUTE);
 }
@@ -134,14 +128,14 @@ function calculateEventDurationMinutes(events: Event[], date: Date): number {
 // Helper to calculate maintenance duration in minutes for a specific day
 function getMaintenanceDurationMinutes(
   maintenances: Event[],
-  date: Date,
+  date: Date | DayWindow,
 ): number {
   return calculateEventDurationMinutes(maintenances, date);
 }
 
 // Helper to get adjusted total minutes accounting for maintenance
 function getAdjustedTotalMinutesInDay(
-  date: Date,
+  date: Date | DayWindow,
   maintenances: Event[],
 ): number {
   const totalMinutes = getTotalMinutesInDay(date);
@@ -149,14 +143,14 @@ function getAdjustedTotalMinutesInDay(
   return Math.max(0, totalMinutes - maintenanceMinutes);
 }
 
-function getTotalEventsDurationMs(events: Event[], date: Date): number {
+function getTotalEventsDurationMs(
+  events: Event[],
+  day: Date | DayWindow,
+): number {
   if (events.length === 0) return 0;
 
-  const startOfDay = new Date(date);
-  startOfDay.setUTCHours(0, 0, 0, 0);
-
-  const endOfDay = new Date(date);
-  endOfDay.setUTCHours(23, 59, 59, 999);
+  const { start: startOfDay, end } = toDayWindow(day);
+  const endOfDay = new Date(end.getTime() - 1);
 
   const total = events.reduce((acc, curr) => {
     if (!curr.from) return acc;
@@ -180,8 +174,8 @@ function getTotalEventsDurationMs(events: Event[], date: Date): number {
     return acc + Math.max(0, duration);
   }, 0);
 
-  // Cap at 24 hours per day
-  return Math.min(total, MS_PER_DAY);
+  // Cap at the window's real length (23h/25h on DST days)
+  return Math.min(total, end.getTime() - startOfDay.getTime());
 }
 
 export function setDataByType({
@@ -200,7 +194,7 @@ export function setDataByType({
     incidents: Event[],
     reports: Event[],
     maintenances: Event[],
-    date: Date,
+    date: Date | DayWindow,
   ): Array<{ status: "info" | "degraded" | "error"; count: number }> {
     // impact reports contribute per-interval slices to each color bucket, so a
     // 1h major_outage inside a 24h report only paints 1h red; legacy reports
@@ -239,29 +233,31 @@ export function setDataByType({
   }
 
   function createErrorOnlyBarData(
-    errorSegmentCount: number,
+    errorMs: number,
+    dayMs: number,
   ): UptimeData["bar"] {
     return [
       {
         status: "success" as const,
-        height: ((MS_PER_DAY - errorSegmentCount) / MS_PER_DAY) * 100,
+        height: ((dayMs - errorMs) / dayMs) * 100,
       },
       {
         status: "error" as const,
-        height: (errorSegmentCount / MS_PER_DAY) * 100,
+        height: (errorMs / dayMs) * 100,
       },
     ];
   }
 
   function createProportionalBarData(
     segments: Array<{ status: "info" | "degraded" | "error"; count: number }>,
+    dayMs: number,
   ): UptimeData["bar"] {
     // Downtime keeps its true proportion of the day; maintenance/reports are
     // highlight events that fill the remaining space (no uptime shown).
     const errorMs = segments
       .filter((segment) => segment.status === "error")
       .reduce((sum, segment) => sum + segment.count, 0);
-    const errorHeight = (Math.min(errorMs, MS_PER_DAY) / MS_PER_DAY) * 100;
+    const errorHeight = (Math.min(errorMs, dayMs) / dayMs) * 100;
     const remainingHeight = Math.max(0, 100 - errorHeight);
 
     const highlightSegments = segments.filter(
@@ -375,7 +371,10 @@ export function setDataByType({
   }
 
   // Helper to calculate duration in minutes for a specific event type
-  function calculateEventDurationMinutes(events: Event[], date: Date): number {
+  function calculateEventDurationMinutes(
+    events: Event[],
+    date: Date | DayWindow,
+  ): number {
     const totalDuration = getTotalEventsDurationMs(events, date);
     return Math.round(totalDuration / MILLISECONDS_PER_MINUTE);
   }
@@ -384,7 +383,7 @@ export function setDataByType({
   function createDurationCardEntry(
     status: "error" | "degraded" | "info" | "success",
     events: Event[],
-    date: Date,
+    date: Date | DayWindow,
     durationMap: Map<string, number>,
     maintenances: Event[] = [],
   ): {
@@ -422,7 +421,8 @@ export function setDataByType({
   }
 
   return data.map((dayData) => {
-    const date = new Date(dayData.day);
+    const date = dayWindowOf(dayData);
+    const dayMs = date.end.getTime() - date.start.getTime();
 
     // Find events for this day
     const dayEvents = events.filter((event) => isDateWithinEvent(date, event));
@@ -471,10 +471,10 @@ export function setDataByType({
             eventSegments.length === 1 &&
             eventSegments[0].status === "error"
           ) {
-            barData = createErrorOnlyBarData(eventSegments[0].count);
+            barData = createErrorOnlyBarData(eventSegments[0].count, dayMs);
           } else {
             // Multiple segments: show proportional distribution
-            barData = createProportionalBarData(eventSegments);
+            barData = createProportionalBarData(eventSegments, dayMs);
           }
         } else if (total === 0) {
           // Empty day - no data available
@@ -686,14 +686,15 @@ export function getUptime({
   if (barType === "manual" || cardType === "duration") {
     // Clamp event durations to the data lookback window to avoid
     // events outside the window producing negative uptime values.
-    const timestamps = data.map((d) => new Date(d.day).getTime());
-    const { segments: coverage, totalMs: total } = dayCoverage(timestamps);
+    const windows = data.map((d) => {
+      const w = dayWindowOf(d);
+      return { start: w.start.getTime(), end: w.end.getTime() };
+    });
+    const { segments: coverage, totalMs: total } = dayCoverage(windows);
     if (total === 0) return "100%";
-    const windowEndDate = new Date(Math.max(...timestamps));
-    windowEndDate.setUTCHours(23, 59, 59, 999);
     const window: UptimeWindow = {
-      start: Math.min(...timestamps),
-      end: windowEndDate.getTime(),
+      start: Math.min(...windows.map((w) => w.start)),
+      end: Math.max(...windows.map((w) => w.end)) - 1,
       now: Date.now(),
     };
 
