@@ -35,6 +35,7 @@ import {
 } from "@openstatus/ui/components/ui/select";
 import { Separator } from "@openstatus/ui/components/ui/separator";
 import { cn } from "@openstatus/ui/lib/utils";
+import { canonicalTimeZone } from "@openstatus/utils";
 import { parseAsString, useQueryState } from "nuqs";
 import type React from "react";
 import { createContext, useContext, useEffect, useState } from "react";
@@ -73,6 +74,8 @@ interface StatusPageContextType {
   /** Unregistered theme previewed from the explorer's builder. */
   draftTheme: Theme | null;
   setDraftTheme: (draftTheme: Theme | null) => void;
+  /** IANA zone every timestamp and day boundary on the page is rendered in. */
+  timezone: string;
 }
 
 const StatusPageContext = createContext<StatusPageContextType | null>(null);
@@ -93,6 +96,7 @@ export function StatusPageProvider({
   defaultNumberOfDays = 45,
   defaultCommunityTheme = "default",
   customTheme,
+  timezone: timezoneProp = "UTC",
 }: {
   children: React.ReactNode;
   defaultCardType?: CardType;
@@ -101,7 +105,11 @@ export function StatusPageProvider({
   defaultNumberOfDays?: NumberOfDays;
   defaultCommunityTheme?: CommunityTheme;
   customTheme?: CustomTheme | null;
+  timezone?: string;
 }) {
+  // A zone this runtime cannot resolve (stale tzdata, a bad row) falls back to
+  // UTC here so no formatter below ever throws on it.
+  const timezone = canonicalTimeZone(timezoneProp) ?? "UTC";
   const [cardType, setCardType] = useState<CardType>(defaultCardType);
   const [barType, setBarType] = useState<BarType>(defaultBarType);
   const [showUptime, setShowUptime] = useState<boolean>(defaultShowUptime);
@@ -157,6 +165,7 @@ export function StatusPageProvider({
         setCommunityTheme,
         draftTheme,
         setDraftTheme,
+        timezone,
       }}
     >
       {children}

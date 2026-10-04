@@ -1,6 +1,6 @@
 import { UTCDate } from "@date-fns/utc";
 import type { StatusBlocksLabels } from "@openstatus/ui/components/blocks/status-i18n";
-import { endOfDay, isSameDay, startOfDay } from "date-fns";
+import { endOfDay, format, isSameDay, startOfDay } from "date-fns";
 
 /**
  * Formats a date range in a human-readable format.
@@ -349,6 +349,8 @@ export const defaultStatusBlocksLabels = {
   formatDate: (d: Date) => withUTC(formatDate(d)),
   formatDateShort: (d: Date) => formatDateShort(d),
   formatDateTime: (d: Date) => withUTC(formatDateTime(d)),
+  formatTimestamp: (d: Date) =>
+    format(new UTCDate(d), "LLL dd, y HH:mm '(UTC)'"),
   formatDateRange: (from?: Date, to?: Date) => {
     const range = formatDateRange(from, to);
     return from || to ? withUTC(range) : range;

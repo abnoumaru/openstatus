@@ -4,6 +4,7 @@ import {
   StatusBlocksI18nProvider,
   type StatusBlocksLabels,
 } from "@openstatus/ui/components/blocks/status-i18n";
+import { timeZoneAbbreviation, timeZoneOffsetMs } from "@openstatus/utils";
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo } from "react";
 
@@ -13,9 +14,38 @@ import {
   formatDateRangeParts,
   formatDateTime,
 } from "../../lib/formatter";
+import { useStatusPage } from "../status-page/floating-button";
 
-// Status-page timestamps render in UTC; the suffix tells viewers which zone.
-const withUTC = (value: string) => `${value} (UTC)`;
+// "JST"-style abbreviation where one is well known, otherwise "GMT+9" built
+// from the offset — never Intl's zone *names*, whose spelling differs between
+// the server's and the browser's ICU and would break hydration.
+function zoneLabel(timeZone: string) {
+  if (timeZone === "UTC") return "UTC";
+  const abbreviation = timeZoneAbbreviation(timeZone);
+  if (abbreviation) return abbreviation;
+  const minutes = timeZoneOffsetMs(new Date(), timeZone) / 60_000;
+  const sign = minutes < 0 ? "-" : "+";
+  const h = Math.floor(Math.abs(minutes) / 60);
+  const m = Math.abs(minutes) % 60;
+  return `GMT${sign}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`;
+}
+
+// `Oct 03, 2026 14:41` in the page zone — same shape as the UTC default so
+// the banner looks identical whichever zone it is in.
+function formatStamp(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("month")} ${get("day")}, ${get("year")} ${get("hour")}:${get("minute")}`;
+}
 
 /**
  * StatusBlocksProvider
@@ -35,9 +65,12 @@ export function StatusBlocksProvider({
 }) {
   const t = useExtracted();
   const locale = useLocale();
+  const { timezone } = useStatusPage();
 
-  const value = useMemo<StatusBlocksLabels>(
-    () => ({
+  const value = useMemo<StatusBlocksLabels>(() => {
+    // Status-page timestamps render in the page zone; the suffix tells viewers which.
+    const withZone = (value: string) => `${value} (${zoneLabel(timezone)})`;
+    return {
       systemStatus: {
         success: {
           long: t("All Systems Operational"),
@@ -116,20 +149,28 @@ export function StatusBlocksProvider({
       durationAcross: (duration: string) =>
         t("across {duration}", { duration }),
 
-      formatDate: (d: Date) => withUTC(formatDate(d, { locale })),
-      formatDateShort: (d: Date) => formatDate(d, { month: "short", locale }),
-      formatDateTime: (d: Date) => withUTC(formatDateTime(d, locale)),
+      formatDate: (d: Date) =>
+        withZone(formatDate(d, { locale, timeZone: timezone })),
+      formatDateShort: (d: Date) =>
+        formatDate(d, { month: "short", locale, timeZone: timezone }),
+      formatDateTime: (d: Date) =>
+        withZone(formatDateTime(d, locale, timezone)),
+      formatTimestamp: (d: Date) => withZone(formatStamp(d, timezone)),
       formatDateRange: (from?: Date, to?: Date) => {
-        const range = formatDateRange(from, to, locale);
-        return from || to ? withUTC(range) : range;
+        const range = formatDateRange(from, to, locale, timezone);
+        return from || to ? withZone(range) : range;
       },
       formatDateRangeParts: (from: Date, to: Date) => {
-        const { from: start, to: end } = formatDateRangeParts(from, to, locale);
-        return { from: start, to: withUTC(end) };
+        const { from: start, to: end } = formatDateRangeParts(
+          from,
+          to,
+          locale,
+          timezone,
+        );
+        return { from: start, to: withZone(end) };
       },
-    }),
-    [t, locale],
-  );
+    };
+  }, [t, locale, timezone]);
 
   return (
     <StatusBlocksI18nProvider value={value}>

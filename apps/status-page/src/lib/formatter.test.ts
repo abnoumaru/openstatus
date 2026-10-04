@@ -33,13 +33,19 @@ describe("formatter UTC rendering", () => {
       );
     });
 
-    test("ignores a caller attempt to override the timezone", () => {
-      // 01:00 UTC is still Jan 14 in New York, so a leaked override would read "January 14".
+    test("renders in the requested zone and defaults to UTC", () => {
+      const d = new Date("2024-01-15T22:30:00Z"); // 07:30 JST on the 16th
+      expect(formatDate(d)).toBe("January 15, 2024");
+      expect(formatDate(d, { timeZone: "Asia/Tokyo" })).toBe(
+        "January 16, 2024",
+      );
+      // `timeZone` wins over anything else in the options bag
       expect(
-        formatDate(new Date("2024-01-15T01:00:00Z"), {
-          timeZone: "America/New_York",
+        formatDate(d, {
+          ...({ timeZone: "UTC" } as object),
+          timeZone: "Asia/Tokyo",
         }),
-      ).toBe("January 15, 2024");
+      ).toBe("January 16, 2024");
     });
   });
 

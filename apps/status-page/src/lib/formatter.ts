@@ -1,5 +1,8 @@
-import { UTCDate } from "@date-fns/utc";
-import { endOfDay, isSameDay, startOfDay } from "date-fns";
+import {
+  endOfDayInTimeZone,
+  isSameDayInTimeZone,
+  startOfDayInTimeZone,
+} from "@openstatus/utils";
 
 export function formatMilliseconds(ms: number) {
   if (ms > 1000) {
@@ -50,39 +53,40 @@ export function formatNumber(
 
 // TODO: think of supporting custom formats
 
-// All status-page timestamps render in UTC for consistency across viewers; the
+// All status-page timestamps render in the page's configured zone (UTC unless
+// the page says otherwise) so every viewer sees the same time; the
 // StatusTimestamp hover card surfaces the viewer's local timezone on demand.
 
 export function formatDate(
   date: Date,
   options?: Intl.DateTimeFormatOptions & { locale?: string },
 ) {
-  const { locale, ...rest } = options ?? {};
+  const { locale, timeZone = "UTC", ...rest } = options ?? {};
   return date.toLocaleDateString(locale, {
     year: "numeric",
     month: "long",
     day: "numeric",
     ...rest,
-    // last so callers can't override away from UTC (the "(UTC)" label depends on it)
-    timeZone: "UTC",
+    // last so `rest` can't override the zone (the zone label depends on it)
+    timeZone,
   });
 }
 
-export function formatDateTime(date: Date, locale?: string) {
+export function formatDateTime(date: Date, locale?: string, timeZone = "UTC") {
   return date.toLocaleDateString(locale, {
     month: "long",
     day: "numeric",
     hour: "numeric",
     minute: "numeric",
-    timeZone: "UTC",
+    timeZone,
   });
 }
 
-export function formatTime(date: Date, locale?: string) {
+export function formatTime(date: Date, locale?: string, timeZone = "UTC") {
   return date.toLocaleTimeString(locale, {
     hour: "numeric",
     minute: "numeric",
-    timeZone: "UTC",
+    timeZone,
   });
 }
 
@@ -95,56 +99,64 @@ export function formatDateRangeParts(
   from: Date,
   to: Date,
   locale?: string,
+  timeZone = "UTC",
 ): { from: string; to: string } {
-  if (isSameDay(new UTCDate(from), new UTCDate(to))) {
+  if (isSameDayInTimeZone(from, to, timeZone)) {
     return {
-      from: formatDateTime(from, locale),
-      to: formatTime(to, locale),
+      from: formatDateTime(from, locale, timeZone),
+      to: formatTime(to, locale, timeZone),
     };
   }
   const isFromStartDay =
-    startOfDay(new UTCDate(from)).getTime() === from.getTime();
-  const isToEndDay = endOfDay(new UTCDate(to)).getTime() === to.getTime();
+    startOfDayInTimeZone(from, timeZone).getTime() === from.getTime();
+  const isToEndDay =
+    endOfDayInTimeZone(to, timeZone).getTime() === to.getTime();
   if (isFromStartDay && isToEndDay) {
     return {
-      from: formatDate(from, { locale }),
-      to: formatDate(to, { locale }),
+      from: formatDate(from, { locale, timeZone }),
+      to: formatDate(to, { locale, timeZone }),
     };
   }
   return {
-    from: formatDateTime(from, locale),
-    to: formatDateTime(to, locale),
+    from: formatDateTime(from, locale, timeZone),
+    to: formatDateTime(to, locale, timeZone),
   };
 }
 
-export function formatDateRange(from?: Date, to?: Date, locale?: string) {
-  const sameDay = from && to && isSameDay(new UTCDate(from), new UTCDate(to));
+export function formatDateRange(
+  from?: Date,
+  to?: Date,
+  locale?: string,
+  timeZone = "UTC",
+) {
+  const sameDay = from && to && isSameDayInTimeZone(from, to, timeZone);
   const isFromStartDay =
-    from && startOfDay(new UTCDate(from)).getTime() === from.getTime();
-  const isToEndDay = to && endOfDay(new UTCDate(to)).getTime() === to.getTime();
+    from && startOfDayInTimeZone(from, timeZone).getTime() === from.getTime();
+  const isToEndDay =
+    to && endOfDayInTimeZone(to, timeZone).getTime() === to.getTime();
 
   if (sameDay) {
     if (from.getTime() === to.getTime()) {
-      return formatDateTime(from, locale);
+      return formatDateTime(from, locale, timeZone);
     }
     if (from && to) {
-      return `${formatDateTime(from, locale)} - ${formatTime(to, locale)}`;
+      return `${formatDateTime(from, locale, timeZone)} - ${formatTime(to, locale, timeZone)}`;
     }
   }
 
   if (from && to) {
     if (isFromStartDay && isToEndDay) {
-      return `${formatDate(from, { locale })} - ${formatDate(to, { locale })}`;
+      return `${formatDate(from, { locale, timeZone })} - ${formatDate(to, { locale, timeZone })}`;
     }
-    return `${formatDateTime(from, locale)} - ${formatDateTime(to, locale)}`;
+    return `${formatDateTime(from, locale, timeZone)} - ${formatDateTime(to, locale, timeZone)}`;
   }
 
   if (to) {
-    return `Until ${formatDateTime(to, locale)}`;
+    return `Until ${formatDateTime(to, locale, timeZone)}`;
   }
 
   if (from) {
-    return `Since ${formatDateTime(from, locale)}`;
+    return `Since ${formatDateTime(from, locale, timeZone)}`;
   }
 
   return "All time";

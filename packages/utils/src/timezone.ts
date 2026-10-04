@@ -96,3 +96,42 @@ export function isSameDayInTimeZone(
     startOfDayInTimeZone(b, timeZone).getTime()
   );
 }
+
+// Intl's English short names are "GMT+9"-style for most of the world; these
+// are the abbreviations readers in those zones actually use. Ambiguous ones
+// (CST, IST, …) are left out on purpose and fall back to Intl.
+const ABBREVIATIONS: Record<string, { standard: string; daylight?: string }> = {
+  "Asia/Tokyo": { standard: "JST" },
+  "Asia/Seoul": { standard: "KST" },
+  "Asia/Singapore": { standard: "SGT" },
+  "Asia/Hong_Kong": { standard: "HKT" },
+  "Europe/London": { standard: "GMT", daylight: "BST" },
+  "Europe/Berlin": { standard: "CET", daylight: "CEST" },
+  "Europe/Paris": { standard: "CET", daylight: "CEST" },
+  "Europe/Madrid": { standard: "CET", daylight: "CEST" },
+  "Europe/Amsterdam": { standard: "CET", daylight: "CEST" },
+  "Europe/Helsinki": { standard: "EET", daylight: "EEST" },
+  "Australia/Sydney": { standard: "AEST", daylight: "AEDT" },
+  "Australia/Melbourne": { standard: "AEST", daylight: "AEDT" },
+  "Pacific/Auckland": { standard: "NZST", daylight: "NZDT" },
+};
+
+function isDaylightSaving(date: Date, timeZone: string): boolean {
+  const year = date.getUTCFullYear();
+  const jan = timeZoneOffsetMs(new Date(Date.UTC(year, 0, 1)), timeZone);
+  const jul = timeZoneOffsetMs(new Date(Date.UTC(year, 6, 1)), timeZone);
+  if (jan === jul) return false;
+  // standard time is the smaller offset in either hemisphere
+  return timeZoneOffsetMs(date, timeZone) > Math.min(jan, jul);
+}
+
+/** "JST"-style abbreviation for zones in the table; undefined otherwise. */
+export function timeZoneAbbreviation(
+  timeZone: string,
+  at: Date = new Date(),
+): string | undefined {
+  const entry = ABBREVIATIONS[timeZone];
+  if (!entry) return undefined;
+  if (entry.daylight && isDaylightSaving(at, timeZone)) return entry.daylight;
+  return entry.standard;
+}

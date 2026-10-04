@@ -15,6 +15,10 @@ describe("defaultStatusBlocksLabels UTC suffix", () => {
     expect(labels.formatDateShort(date)).toBe("Jan 15, 2024");
   });
 
+  test("formatTimestamp keeps the compact banner shape", () => {
+    expect(labels.formatTimestamp(date)).toBe("Jan 15, 2024 14:30 (UTC)");
+  });
+
   test("formatDateTime appends the UTC suffix", () => {
     expect(labels.formatDateTime(date)).toBe("January 15 at 2:30 PM (UTC)");
   });
