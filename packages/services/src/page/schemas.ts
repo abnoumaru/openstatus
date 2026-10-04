@@ -1,4 +1,4 @@
-import { insertPageSchema } from "@openstatus/db/src/schema";
+import { insertPageSchema, timeZoneSchema } from "@openstatus/db/src/schema";
 import { pageAccessTypes } from "@openstatus/db/src/schema/pages/constants";
 import {
   customDomainSchema,
@@ -8,6 +8,7 @@ import {
 } from "@openstatus/db/src/schema/pages/validation";
 import { locales } from "@openstatus/locales";
 import { THEME_KEYS, type ThemeKey } from "@openstatus/theme-store";
+import { isWholeHourTimeZone } from "@openstatus/utils";
 import { z } from "zod";
 
 export { pageAccessTypes };
@@ -174,6 +175,16 @@ export const UpdatePageLocalesInput = z
     },
   );
 export type UpdatePageLocalesInput = z.infer<typeof UpdatePageLocalesInput>;
+
+export const UpdatePageTimezoneInput = z.object({
+  id: z.number().int(),
+  // canonicalised by timeZoneSchema; whole-hour only because bars regroup
+  // hourly buckets (see @openstatus/utils isWholeHourTimeZone)
+  defaultTimezone: timeZoneSchema.refine(isWholeHourTimeZone, {
+    message: "Only time zones with a whole-hour offset are supported for now",
+  }),
+});
+export type UpdatePageTimezoneInput = z.input<typeof UpdatePageTimezoneInput>;
 
 // Match undefined before the read validators can fill in defaults.
 export const UpdatePageConfigurationInput = z.object({

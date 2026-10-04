@@ -135,3 +135,26 @@ export function timeZoneAbbreviation(
   if (entry.daylight && isDaylightSaving(at, timeZone)) return entry.daylight;
   return entry.standard;
 }
+
+/**
+ * Hourly status buckets can only be regrouped into days of zones whose offset
+ * is a whole number of hours, so that is the set a page may choose from for
+ * now. Both halves of the year are checked so DST variants count too.
+ */
+export function isWholeHourTimeZone(timeZone: string): boolean {
+  if (canonicalTimeZone(timeZone) === undefined) return false;
+  const year = new Date().getUTCFullYear();
+  return [Date.UTC(year, 0, 1), Date.UTC(year, 6, 1)].every(
+    (t) => timeZoneOffsetMs(new Date(t), timeZone) % 3_600_000 === 0,
+  );
+}
+
+/** Every whole-hour IANA zone this runtime knows, UTC first, then A→Z. */
+export function wholeHourTimeZones(): string[] {
+  const known =
+    typeof Intl.supportedValuesOf === "function"
+      ? Intl.supportedValuesOf("timeZone")
+      : ["Asia/Tokyo", "Europe/Berlin", "America/New_York"];
+  const zones = known.filter((z) => z !== "UTC" && isWholeHourTimeZone(z));
+  return ["UTC", ...zones.sort()];
+}

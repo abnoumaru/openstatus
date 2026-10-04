@@ -7,8 +7,10 @@ import {
   dateInTimeZone,
   endOfDayInTimeZone,
   isSameDayInTimeZone,
+  isWholeHourTimeZone,
   startOfDayInTimeZone,
   timeZoneAbbreviation,
+  wholeHourTimeZones,
 } from "./timezone";
 
 describe("startOfDayInTimeZone", () => {
@@ -143,5 +145,22 @@ describe("timeZoneAbbreviation", () => {
   test("zones outside the table yield undefined so callers can fall back", () => {
     expect(timeZoneAbbreviation("America/Los_Angeles")).toBeUndefined();
     expect(timeZoneAbbreviation("Asia/Kolkata")).toBeUndefined();
+  });
+});
+
+describe("whole-hour zones", () => {
+  test("isWholeHourTimeZone accepts :00 offsets in both halves of the year", () => {
+    expect(isWholeHourTimeZone("Asia/Tokyo")).toBe(true);
+    expect(isWholeHourTimeZone("Europe/Berlin")).toBe(true); // +1 / +2
+    expect(isWholeHourTimeZone("UTC")).toBe(true);
+    expect(isWholeHourTimeZone("Asia/Kolkata")).toBe(false); // +5:30
+    expect(isWholeHourTimeZone("Australia/Lord_Howe")).toBe(false); // +10:30 / +11
+  });
+  test("wholeHourTimeZones lists UTC first and only whole-hour zones", () => {
+    const zones = wholeHourTimeZones();
+    expect(zones[0]).toBe("UTC");
+    expect(zones).toContain("Asia/Tokyo");
+    expect(zones).not.toContain("Asia/Kolkata");
+    expect(zones.every((z) => isWholeHourTimeZone(z))).toBe(true);
   });
 });
