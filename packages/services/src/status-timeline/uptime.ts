@@ -2,11 +2,12 @@ import {
   LEGACY_IMPACT_WEIGHT,
   impactUptimeWeight,
 } from "@openstatus/db/src/schema";
+import { MS_PER_DAY } from "@openstatus/utils";
 
 import { type WeightedInterval, mergedDowntimeMs } from "./downtime";
-import type { Event, StatusData } from "./events";
+import { type Event, type StatusData, dayWindowOf } from "./events";
 
-export const MS_PER_DAY = 86_400_000;
+export { MS_PER_DAY };
 
 export type CheckCounts = { ok: number; degraded: number; error: number };
 
@@ -22,16 +23,17 @@ export type CoverageSegment = { start: number; end: number };
  * base. `clampEndMs` cuts the in-progress day to elapsed time.
  */
 export function dayCoverage(
-  dayStartsMs: number[],
+  days: Array<number | CoverageSegment>,
   clampEndMs?: number,
 ): { segments: CoverageSegment[]; totalMs: number } {
   let totalMs = 0;
   const segments: CoverageSegment[] = [];
-  for (const start of dayStartsMs) {
+  for (const day of days) {
+    // a bare start means a 24h day; a segment carries its real DST-aware end
+    const start = typeof day === "number" ? day : day.start;
+    const dayEnd = typeof day === "number" ? start + MS_PER_DAY : day.end;
     const end =
-      clampEndMs === undefined
-        ? start + MS_PER_DAY
-        : Math.min(start + MS_PER_DAY, clampEndMs);
+      clampEndMs === undefined ? dayEnd : Math.min(dayEnd, clampEndMs);
     if (end <= start) continue;
     totalMs += end - start;
     segments.push({ start, end });
@@ -164,8 +166,9 @@ export function probeDowntimeIntervals(
   const intervals: WeightedInterval[] = [];
 
   for (const item of data) {
-    const dayStart = new Date(item.day).getTime();
-    const dayEnd = dayStart + MS_PER_DAY;
+    const day = dayWindowOf(item);
+    const dayStart = day.start.getTime();
+    const dayEnd = day.end.getTime();
 
     // Clamp to window
     const start = Math.max(dayStart, window.start);
